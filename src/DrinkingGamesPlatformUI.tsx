@@ -185,6 +185,57 @@ const ROLE_POOL: RoleCtor[] = [
 
 type Assigned = { player: EnginePlayer; role: import("./roles/BaseRole").BaseRole };
 
+const ROLE_POWER_TEXT: Record<string, { up: string; down: string }> = {
+  Berserker: {
+    up: 'Assign 2 drinks to a random other player.',
+    down: 'You take 2 drinks (Berserker Exhaustion).',
+  },
+  Trickster: {
+    up: 'Redirect the last incoming drink to a different player (if available).',
+    down: 'You take 2 drinks (Trickster Backfire).',
+  },
+  Lightweight: {
+    up: 'Gain temporary immunity.',
+    down: 'Lose immunity and take 2 drinks (Lightweight Crash).',
+  },
+  Tank: {
+    up: 'Give 2 drinks to a random opponent and remove 1 from yourself.',
+    down: 'Take 3 drinks (Tank Overextension).',
+  },
+  'Social Butterfly': {
+    up: 'All other players each take 1 drink.',
+    down: 'You drink once per other player (Social Debt).',
+  },
+  Gremlin: {
+    up: 'Randomly distribute 3 single drinks across all players.',
+    down: 'You take 3 drinks (Gremlin Self-Chaos).',
+  },
+  Lawyer: {
+    up: 'Shield one random ally from the next drink effect.',
+    down: 'Lose objections and take 2 drinks (Disbarment).',
+  },
+  Cleric: {
+    up: 'Remove 2 drinks from the highest-drink player.',
+    down: 'Take 2 drinks (Divine Punishment).',
+  },
+  'Time Traveler': {
+    up: 'Replay the last 3 effects from history.',
+    down: 'Take 3 drinks (Temporal Paradox).',
+  },
+  Bartender: {
+    up: 'Swap drink counts between two random players.',
+    down: 'Remove house rule and take 2 drinks.',
+  },
+};
+
+function getRolePowerText(roleName: string) {
+  return ROLE_POWER_TEXT[roleName] ?? {
+    up: 'Use this class power.',
+    down: 'Apply this class drawback.',
+  };
+}
+
+
 function createGameState(): { engine: GameEngine; assignments: Assigned[] } {
   const engine = new GameEngine(new ConsoleLogger("PourDecisions"), new DefaultRandomProvider(), new EffectResolver());
   const players = ["Player 1", "Player 2", "Player 3", "Player 4", "Player 5"].map((name, idx) => new EnginePlayer(`p${idx + 1}`, name));
@@ -276,8 +327,8 @@ export default function DrinkingGamesPlatformUI() {
               <div className="font-bold">{a.player.name}</div>
               <div className="text-sm text-black">Class: {a.role.name}</div>
               <div className="mt-1 text-xs text-black/70">{a.role.description}</div>
-              <div className="mt-2 text-xs text-black/80">Power Up: Trigger class active ability.</div>
-              <div className="text-xs text-black/80">Power Down: Trigger class drawback.</div>
+              <div className="mt-2 text-xs text-black/80">Power Up: {getRolePowerText(a.role.name).up}</div>
+              <div className="text-xs text-black/80">Power Down: {getRolePowerText(a.role.name).down}</div>
               <div className="mt-2 flex gap-2">
                 <button className="rounded-lg bg-white px-2 py-1 text-xs font-semibold" onClick={() => usePowerUp(a.player.id)}>Power Up</button>
                 <button className="rounded-lg bg-white px-2 py-1 text-xs font-semibold" onClick={() => usePowerDown(a.player.id)}>Power Down</button>
@@ -305,8 +356,8 @@ export default function DrinkingGamesPlatformUI() {
 
         <div className="rounded-2xl border border-black/20 bg-white p-4">
           <div className="mb-2 text-sm font-bold">Leaderboard</div>
-          {players.map((p) => (
-            <div key={p.id} className="flex justify-between text-sm"><span>{p.name}</span><span>{totals[p.id] ?? 0} sips</span></div>
+          {players.map((p, idx) => (
+            <div key={p.id} className="flex justify-between text-sm"><span>{idx + 1}. {p.name}</span><span>{totals[p.id] ?? 0} sips</span></div>
           ))}
           <div className="mt-3 text-xs text-black/60">Deck loaded: {FULL_DECK.length} cards (first 38 + Biernet 62).</div>
           <button onClick={resetGame} className="mt-3 rounded-xl bg-white px-3 py-2 text-sm">New game (reassign classes)</button>
