@@ -1,23 +1,30 @@
-# Pour-Decisions
+# Iron Liver (FeL) token
 
-Standalone React + TypeScript app for party card gameplay.
+Minimal Hardhat project that implements a fixed-supply ERC-20 token `Iron Liver` (symbol `FeL`).
 
-## Features
-- No swipe gestures; gameplay uses **Turn card** action.
-- Random acting player every turn.
-- 100-card deck (`38 + 62 Biernet-derived cards`).
-- Exactly 5 players per game.
-- Unique class assigned to each player at game start.
-- Class panel shows role name, description, and has **Power Up / Power Down** actions.
+Quick start:
 
-## Run
+1. Install dependencies
+
 ```bash
 npm install
-npm run dev
 ```
 
-## Build
+2. Compile
+
 ```bash
-npm run build
-npm run preview
+npm run compile
 ```
+
+3. Run tests
+
+```bash
+npm test
+```
+
+Notes:
+- The contract `IronLiver` accepts an `initialSupply` parameter (use `ethers.utils.parseUnits("1000000", 18)` for 1,000,000 tokens with 18 decimals).
+- To deploy to a testnet, set RPC and private key env vars and add network config to `hardhat.config.js`.
+# Geile Waifu Drinking Game Vibe Coded Extravaganza
+# To Do:
+# Promotie voor Anton
