@@ -1,0 +1,43 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #000;
+  background: #fff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: #fff;
+  color: #000;
+}
+
+body {
+  background: #fff;
+  color: #000;
+}
+
+button,
+input,
+select,
+textarea {
+  border: 0;
+  color: #000;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* Ensure app wrapper and card blocks remain white-on-black text regardless of utility classes */
+.min-h-screen,
+.rounded-2xl,
+.rounded-3xl {
+  background: #fff !important;
+  color: #000 !important;
+}
