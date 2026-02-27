@@ -261,55 +261,55 @@ export default function DrinkingGamesPlatformUI() {
   const totals = useMemo(() => Object.fromEntries(players.map((p) => [p.id, engine.getPlayer(p.id).drinkCount])), [players, engine, roundNumber]);
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-white">
+    <div className="min-h-screen bg-white p-6 text-black">
       <div className="mx-auto max-w-2xl space-y-4">
         <h1 className="text-3xl font-black">🍻 Pour-Decisions</h1>
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-sm text-white/70">Round {roundNumber}</div>
+        <div className="rounded-2xl border border-black/20 bg-white p-4">
+          <div className="text-sm text-black/70">Round {roundNumber}</div>
           <div className="text-lg font-bold">Acting player: {players[actingPlayerIdx].name}</div>
-          <div className="mt-2 text-xs text-emerald-300">No swiping — just turn cards. Turns are random each round.</div>
+          <div className="mt-2 text-xs text-black">No swiping — just turn cards. Turns are random each round.</div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-2">
           {assignments.map((a) => (
-            <div key={a.player.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <div key={a.player.id} className="rounded-2xl border border-black/20 bg-white p-4">
               <div className="font-bold">{a.player.name}</div>
-              <div className="text-sm text-sky-300">Class: {a.role.name}</div>
-              <div className="mt-1 text-xs text-white/70">{a.role.description}</div>
-              <div className="mt-2 text-xs text-white/80">Power Up: Trigger class active ability.</div>
-              <div className="text-xs text-white/80">Power Down: Trigger class drawback.</div>
+              <div className="text-sm text-black">Class: {a.role.name}</div>
+              <div className="mt-1 text-xs text-black/70">{a.role.description}</div>
+              <div className="mt-2 text-xs text-black/80">Power Up: Trigger class active ability.</div>
+              <div className="text-xs text-black/80">Power Down: Trigger class drawback.</div>
               <div className="mt-2 flex gap-2">
-                <button className="rounded-lg bg-sky-500 px-2 py-1 text-xs font-semibold" onClick={() => usePowerUp(a.player.id)}>Power Up</button>
-                <button className="rounded-lg bg-rose-500 px-2 py-1 text-xs font-semibold" onClick={() => usePowerDown(a.player.id)}>Power Down</button>
+                <button className="rounded-lg bg-white px-2 py-1 text-xs font-semibold" onClick={() => usePowerUp(a.player.id)}>Power Up</button>
+                <button className="rounded-lg bg-white px-2 py-1 text-xs font-semibold" onClick={() => usePowerDown(a.player.id)}>Power Down</button>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <div className="text-xs text-white/70">{currentCard.type}</div>
+        <div className="rounded-2xl border border-black/20 bg-white p-4">
+          <div className="text-xs text-black/70">{currentCard.type}</div>
           <div className="text-xl font-extrabold">{currentCard.title}</div>
-          <p className="mt-2 text-sm text-white/80">{currentCard.prompt}</p>
-          <button onClick={turnCard} className="mt-4 rounded-xl bg-white px-4 py-2 font-semibold text-slate-900">Turn card</button>
+          <p className="mt-2 text-sm text-black/80">{currentCard.prompt}</p>
+          <button onClick={turnCard} className="mt-4 rounded-xl bg-white px-4 py-2 font-semibold text-black">Turn card</button>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-2xl border border-black/20 bg-white p-4">
           <div className="mb-2 text-sm font-bold">Round sips</div>
           {players.map((p) => (
             <div key={p.id} className="mb-2 flex items-center justify-between gap-2">
               <span>{p.name}</span>
-              <input className="w-20 rounded-lg bg-white/10 px-2 py-1" inputMode="numeric" value={pendingSipsByPlayerId[p.id] ?? 0} onChange={(e) => setPendingSip(p.id, Number(e.target.value.replace(/[^\d]/g, "")) || 0)} />
+              <input className="w-20 rounded-lg bg-white px-2 py-1" inputMode="numeric" value={pendingSipsByPlayerId[p.id] ?? 0} onChange={(e) => setPendingSip(p.id, Number(e.target.value.replace(/[^\d]/g, "")) || 0)} />
             </div>
           ))}
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-2xl border border-black/20 bg-white p-4">
           <div className="mb-2 text-sm font-bold">Leaderboard</div>
           {players.map((p) => (
             <div key={p.id} className="flex justify-between text-sm"><span>{p.name}</span><span>{totals[p.id] ?? 0} sips</span></div>
           ))}
-          <div className="mt-3 text-xs text-white/60">Deck loaded: {FULL_DECK.length} cards (first 38 + Biernet 62).</div>
-          <button onClick={resetGame} className="mt-3 rounded-xl bg-white/20 px-3 py-2 text-sm">New game (reassign classes)</button>
+          <div className="mt-3 text-xs text-black/60">Deck loaded: {FULL_DECK.length} cards (first 38 + Biernet 62).</div>
+          <button onClick={resetGame} className="mt-3 rounded-xl bg-white px-3 py-2 text-sm">New game (reassign classes)</button>
         </div>
       </div>
     </div>
