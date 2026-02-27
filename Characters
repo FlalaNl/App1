@@ -1,0 +1,1615 @@
+// ================================
+// services/Logger.ts
+// ================================
+
+export enum LogLevel {
+  DEBUG = 'DEBUG',
+  INFO  = 'INFO',
+  WARN  = 'WARN',
+  ERROR = 'ERROR',
+}
+
+export interface Logger {
+  log(level: LogLevel, message: string, meta?: Record<string, unknown>): void;
+  debug(message: string, meta?: Record<string, unknown>): void;
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+}
+
+export class ConsoleLogger implements Logger {
+  private readonly prefix: string;
+
+  constructor(prefix = 'PourDecisions') {
+    this.prefix = prefix;
+  }
+
+  log(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
+    const timestamp = new Date().toISOString();
+    const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
+    console.log(`[${timestamp}] [${this.prefix}] [${level}] ${message}${metaStr}`);
+  }
+
+  debug(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.DEBUG, message, meta);
+  }
+
+  info(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.INFO, message, meta);
+  }
+
+  warn(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.WARN, message, meta);
+  }
+
+  error(message: string, meta?: Record<string, unknown>): void {
+    this.log(LogLevel.ERROR, message, meta);
+  }
+}
+
+// ================================
+// services/RandomProvider.ts
+// ================================
+
+export interface RandomProvider {
+  /** Returns a float in [0, 1) */
+  next(): number;
+  /** Returns an integer in [min, max] inclusive */
+  nextInt(min: number, max: number): number;
+  /** Picks a random element from an array */
+  pick<T>(arr: T[]): T;
+  /** Shuffles array in-place, returns it */
+  shuffle<T>(arr: T[]): T[];
+}
+
+export class DefaultRandomProvider implements RandomProvider {
+  next(): number {
+    return Math.random();
+  }
+
+  nextInt(min: number, max: number): number {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
+
+  pick<T>(arr: T[]): T {
+    if (arr.length === 0) throw new Error('Cannot pick from empty array');
+    return arr[this.nextInt(0, arr.length - 1)];
+  }
+
+  shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = this.nextInt(0, i);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+}
+
+/**
+ * Seeded deterministic PRNG (Mulberry32) — useful for testing & replay.
+ * Pass a known seed to reproduce identical game sequences.
+ */
+export class SeededRandomProvider implements RandomProvider {
+  private seed: number;
+
+  constructor(seed: number) {
+    this.seed = seed;
+  }
+
+  next(): number {
+    this.seed |= 0;
+    this.seed = (this.seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(this.seed ^ (this.seed >>> 15), 1 | this.seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  nextInt(min: number, max: number): number {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
+
+  pick<T>(arr: T[]): T {
+    if (arr.length === 0) throw new Error('Cannot pick from empty array');
+    return arr[this.nextInt(0, arr.length - 1)];
+  }
+
+  shuffle<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = this.nextInt(0, i);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+}
+
+// ================================
+// core/GameEvents.ts
+// ================================
+
+export enum GameEventType {
+  GAME_STARTED      = 'GAME_STARTED',
+  GAME_ENDED        = 'GAME_ENDED',
+  ROUND_STARTED     = 'ROUND_STARTED',
+  ROUND_ENDED       = 'ROUND_ENDED',
+  TURN_STARTED      = 'TURN_STARTED',
+  TURN_ENDED        = 'TURN_ENDED',
+  DRINK_ASSIGNED    = 'DRINK_ASSIGNED',
+  DRINK_TAKEN       = 'DRINK_TAKEN',
+  POWER_UP_USED     = 'POWER_UP_USED',
+  POWER_DOWN_USED   = 'POWER_DOWN_USED',
+  EFFECT_APPLIED    = 'EFFECT_APPLIED',
+  EFFECT_CANCELLED  = 'EFFECT_CANCELLED',
+  EFFECT_REDIRECTED = 'EFFECT_REDIRECTED',
+  PLAYER_SKIPPED    = 'PLAYER_SKIPPED',
+  RULE_ADDED        = 'RULE_ADDED',
+}
+
+/** Immutable event payload — use readonly everywhere */
+export interface GameEvent<TPayload = unknown> {
+  readonly type: GameEventType;
+  readonly payload: TPayload;
+  readonly timestamp: number;
+  /** Monotonically increasing sequence number — enables replay ordering */
+  readonly sequence: number;
+}
+
+// Typed payload shapes —————————————————————————————————————————————————————
+
+export interface TurnStartedPayload {
+  readonly playerId: string;
+  readonly round: number;
+  readonly turnIndex: number;
+}
+
+export interface TurnEndedPayload {
+  readonly playerId: string;
+  readonly round: number;
+  readonly turnIndex: number;
+}
+
+export interface DrinkAssignedPayload {
+  readonly fromPlayerId: string;
+  readonly toPlayerId: string;
+  readonly amount: number;
+  readonly reason: string;
+}
+
+export interface DrinkTakenPayload {
+  readonly playerId: string;
+  readonly amount: number;
+}
+
+export interface PowerUsedPayload {
+  readonly playerId: string;
+  readonly roleName: string;
+  readonly powerType: 'up' | 'down';
+}
+
+export interface EffectAppliedPayload {
+  readonly effectType: string;
+  readonly targetPlayerId: string;
+  readonly amount?: number;
+}
+
+export interface EffectCancelledPayload {
+  readonly effectType: string;
+  readonly cancelledBy: string;
+}
+
+export interface RoundStartedPayload {
+  readonly round: number;
+}
+
+export interface RuleAddedPayload {
+  readonly rule: string;
+  readonly addedBy: string;
+}
+
+// ================================
+// core/Player.ts
+// ================================
+
+/** Mutable player state — all mutation goes through controlled setters */
+export class Player {
+  private _drinkCount: number = 0;
+  private _isSkipped: boolean = false;
+  private _isImmune: boolean = false;
+  private _statusEffects: Set<string> = new Set();
+
+  constructor(
+    public readonly id: string,
+    public readonly name: string,
+  ) {}
+
+  get drinkCount(): number { return this._drinkCount; }
+  get isSkipped(): boolean { return this._isSkipped; }
+  get isImmune(): boolean { return this._isImmune; }
+  get statusEffects(): ReadonlySet<string> { return this._statusEffects; }
+
+  addDrinks(amount: number): void {
+    if (amount < 0) throw new Error('Drink amount cannot be negative');
+    this._drinkCount += amount;
+  }
+
+  removeDrinks(amount: number): void {
+    this._drinkCount = Math.max(0, this._drinkCount - amount);
+  }
+
+  setSkipped(value: boolean): void {
+    this._isSkipped = value;
+  }
+
+  setImmune(value: boolean): void {
+    this._isImmune = value;
+  }
+
+  addStatusEffect(effect: string): void {
+    this._statusEffects.add(effect);
+  }
+
+  removeStatusEffect(effect: string): void {
+    this._statusEffects.delete(effect);
+  }
+
+  hasStatusEffect(effect: string): boolean {
+    return this._statusEffects.has(effect);
+  }
+
+  /** Serialisable snapshot — used by Time Traveler and network layer */
+  snapshot(): PlayerSnapshot {
+    return {
+      id: this.id,
+      name: this.name,
+      drinkCount: this._drinkCount,
+      isSkipped: this._isSkipped,
+      isImmune: this._isImmune,
+      statusEffects: [...this._statusEffects],
+    };
+  }
+
+  restoreSnapshot(snap: PlayerSnapshot): void {
+    this._drinkCount   = snap.drinkCount;
+    this._isSkipped    = snap.isSkipped;
+    this._isImmune     = snap.isImmune;
+    this._statusEffects = new Set(snap.statusEffects);
+  }
+}
+
+export interface PlayerSnapshot {
+  readonly id: string;
+  readonly name: string;
+  readonly drinkCount: number;
+  readonly isSkipped: boolean;
+  readonly isImmune: boolean;
+  readonly statusEffects: string[];
+}
+
+// ================================
+// core/GameEngine.ts
+// ================================
+
+import type { Logger } from '../services/Logger';
+import type { RandomProvider } from '../services/RandomProvider';
+import type { GameEvent } from './GameEvents';
+import type { Player } from './Player';
+import type { Effect, EffectContext } from '../effects/Effect';
+import type { BaseRole, RoleContext } from '../roles/BaseRole';
+
+/** A global rule modifier installed by roles like Bartender */
+export interface GameRuleModifier {
+  readonly id: string;
+  readonly description: string;
+  /** Return modified effect list — can add, remove, or mutate effects */
+  apply(effects: Effect[], context: EffectContext): Effect[];
+}
+
+type EventListener<TPayload> = (event: GameEvent<TPayload>) => void;
+
+/**
+ * GameEngine — the central dependency injection container and event bus.
+ *
+ * Responsibilities:
+ *   - Own all players and their state
+ *   - Emit and broadcast typed events
+ *   - Run effects through EffectResolver pipeline
+ *   - Manage rule modifiers (Bartender hook)
+ *   - Expose RoleContext factory
+ *
+ * NOT responsible for:
+ *   - Turn ordering (TurnManager)
+ *   - Role ability logic (BaseRole subclasses)
+ *   - Direct drink mutation (EffectResolver)
+ */
+export class GameEngine {
+  private readonly players: Map<string, Player> = new Map();
+  private readonly roles: Map<string, BaseRole> = new Map();
+  private readonly ruleModifiers: Map<string, GameRuleModifier> = new Map();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly listeners: Map<GameEventType, Set<EventListener<any>>> = new Map();
+
+  private _sequence: number = 0;
+  private _round: number = 0;
+  private _turnIndex: number = 0;
+
+  constructor(
+    private readonly logger: Logger,
+    private readonly random: RandomProvider,
+    private readonly effectResolver: import('../effects/EffectResolver').EffectResolver,
+  ) {}
+
+  // ─── Player management ──────────────────────────────────────────────────
+
+  registerPlayer(player: Player, role: BaseRole): void {
+    this.players.set(player.id, player);
+    this.roles.set(player.id, role);
+    role.onRegister?.(this, player);
+    this.logger.info(`Registered player "${player.name}" as ${role.name}`);
+  }
+
+  getPlayer(id: string): Player {
+    const p = this.players.get(id);
+    if (!p) throw new Error(`Player not found: ${id}`);
+    return p;
+  }
+
+  getAllPlayers(): Player[] {
+    return [...this.players.values()];
+  }
+
+  getRole(playerId: string): BaseRole {
+    const r = this.roles.get(playerId);
+    if (!r) throw new Error(`Role not found for player: ${playerId}`);
+    return r;
+  }
+
+  // ─── State accessors ─────────────────────────────────────────────────────
+
+  get round(): number { return this._round; }
+  get turnIndex(): number { return this._turnIndex; }
+
+  incrementRound(): void { this._round++; }
+  incrementTurn(): void { this._turnIndex++; }
+
+  // ─── Rule modifier system (Bartender) ───────────────────────────────────
+
+  addRuleModifier(modifier: GameRuleModifier): void {
+    this.ruleModifiers.set(modifier.id, modifier);
+    this.logger.info(`Rule modifier added: "${modifier.description}"`);
+  }
+
+  removeRuleModifier(id: string): void {
+    this.ruleModifiers.delete(id);
+  }
+
+  /** Applies all registered rule modifiers to an effect list in order */
+  applyRuleModifiers(effects: Effect[], context: EffectContext): Effect[] {
+    let result = effects;
+    for (const modifier of this.ruleModifiers.values()) {
+      result = modifier.apply(result, context);
+    }
+    return result;
+  }
+
+  // ─── Effect pipeline ────────────────────────────────────────────────────
+
+  /**
+   * Main effect dispatch path:
+   * 1. Apply rule modifiers (Bartender layer)
+   * 2. Run through Lawyer interception layer
+   * 3. Execute remaining effects via EffectResolver
+   */
+  resolveEffects(effects: Effect[], context: EffectContext): void {
+    const modified = this.applyRuleModifiers(effects, context);
+    this.effectResolver.resolve(modified, context, this);
+  }
+
+  // ─── Event bus ──────────────────────────────────────────────────────────
+
+  on<TPayload>(type: GameEventType, listener: EventListener<TPayload>): void {
+    if (!this.listeners.has(type)) {
+      this.listeners.set(type, new Set());
+    }
+    this.listeners.get(type)!.add(listener as EventListener<unknown>);
+  }
+
+  off<TPayload>(type: GameEventType, listener: EventListener<TPayload>): void {
+    this.listeners.get(type)?.delete(listener as EventListener<unknown>);
+  }
+
+  emit<TPayload>(type: GameEventType, payload: TPayload): void {
+    const event: GameEvent<TPayload> = {
+      type,
+      payload,
+      timestamp: Date.now(),
+      sequence: ++this._sequence,
+    };
+
+    this.logger.debug(`Event emitted: ${type}`, { sequence: event.sequence });
+
+    // Notify all registered role listeners
+    for (const [playerId, role] of this.roles.entries()) {
+      const player = this.players.get(playerId)!;
+      role.onEvent?.(event as GameEvent<unknown>, this.makeRoleContext(player));
+    }
+
+    // Notify external listeners
+    const external = this.listeners.get(type);
+    if (external) {
+      for (const listener of external) {
+        listener(event);
+      }
+    }
+  }
+
+  // ─── RoleContext factory ─────────────────────────────────────────────────
+
+  makeRoleContext(player: Player): RoleContext {
+    return {
+      player,
+      engine: this,
+      logger: this.logger,
+      random: this.random,
+      allPlayers: this.getAllPlayers(),
+    };
+  }
+}
+
+// ================================
+// core/TurnManager.ts
+// ================================
+
+import { GameEventType, type TurnStartedPayload, type TurnEndedPayload, type RoundStartedPayload } from './GameEvents';
+import type { GameEngine } from './GameEngine';
+import type { Player } from './Player';
+
+/**
+ * TurnManager — pure orchestration, no game logic.
+ * Drives the turn loop and emits lifecycle events.
+ *
+ * Extensibility hooks:
+ *   - [COOLDOWN] Check and decrement cooldowns before TURN_STARTED
+ *   - [STATUS_EFFECT] Apply per-turn status effect ticks here
+ *   - [AI_BOT] Insert bot decision logic in processTurn
+ */
+export class TurnManager {
+  constructor(private readonly engine: GameEngine) {}
+
+  startRound(): void {
+    this.engine.incrementRound();
+    this.engine.emit<RoundStartedPayload>(GameEventType.ROUND_STARTED, {
+      round: this.engine.round,
+    });
+  }
+
+  async processTurn(player: Player): Promise<void> {
+    if (player.isSkipped) {
+      player.setSkipped(false);
+      this.engine.logger.info(`${player.name} is skipped this turn.`);
+      return;
+    }
+
+    const payload: TurnStartedPayload = {
+      playerId: player.id,
+      round: this.engine.round,
+      turnIndex: this.engine.turnIndex,
+    };
+
+    this.engine.emit<TurnStartedPayload>(GameEventType.TURN_STARTED, payload);
+
+    // [AI_BOT] — if player is a bot, inject automated decision here
+
+    this.engine.incrementTurn();
+
+    const endPayload: TurnEndedPayload = {
+      playerId: player.id,
+      round: this.engine.round,
+      turnIndex: this.engine.turnIndex,
+    };
+
+    this.engine.emit<TurnEndedPayload>(GameEventType.TURN_ENDED, endPayload);
+  }
+}
+
+// ================================
+// core/Game.ts
+// ================================
+
+import type { GameEngine } from './GameEngine';
+import type { TurnManager } from './TurnManager';
+import type { Logger } from '../services/Logger';
+
+/**
+ * Game — top-level coordinator.
+ *
+ * Delegates to GameEngine (state + events) and TurnManager (ordering).
+ * No role or effect logic lives here.
+ */
+export class Game {
+  constructor(
+    private readonly engine: GameEngine,
+    private readonly turnManager: TurnManager,
+    private readonly logger: Logger,
+  ) {}
+
+  async runRound(): Promise<void> {
+    this.turnManager.startRound();
+    const players = this.engine.getAllPlayers();
+
+    for (const player of players) {
+      await this.turnManager.processTurn(player);
+    }
+
+    this.logger.info(`Round ${this.engine.round} complete.`);
+  }
+}
+
+// ================================
+// effects/Effect.ts
+// ================================
+
+import type { Player } from '../core/Player';
+import type { Logger } from '../services/Logger';
+import type { GameEngine } from '../core/GameEngine';
+
+export enum EffectType {
+  DRINK        = 'DRINK',
+  REMOVE_DRINK = 'REMOVE_DRINK',
+  REDIRECT     = 'REDIRECT',
+  SWAP_DRINKS  = 'SWAP_DRINKS',
+  SKIP_TURN    = 'SKIP_TURN',
+  IMMUNITY     = 'IMMUNITY',
+  STATUS       = 'STATUS',
+  CANCEL       = 'CANCEL',
+}
+
+export interface EffectContext {
+  readonly sourcePlayer: Player;
+  readonly engine: GameEngine;
+  readonly logger: Logger;
+}
+
+/**
+ * Effect — unit of state change.
+ *
+ * Effects are:
+ *   - Created by roles
+ *   - Interceptable by the Lawyer layer
+ *   - Logged before execution
+ *   - Stored for replay (Time Traveler)
+ *   - Serialisable for networking
+ */
+export interface Effect {
+  readonly type: EffectType;
+  readonly targetPlayerId: string;
+  execute(context: EffectContext): void;
+  /** Human-readable description for logging and replay UI */
+  describe(): string;
+  /** JSON-serialisable form for networking / persistence hooks */
+  serialize(): Record<string, unknown>;
+}
+
+// ================================
+// effects/DrinkEffect.ts
+// ================================
+
+import { EffectType, type Effect, type EffectContext } from './Effect';
+
+export class DrinkEffect implements Effect {
+  readonly type = EffectType.DRINK;
+
+  constructor(
+    readonly targetPlayerId: string,
+    private readonly amount: number,
+    private readonly reason: string,
+  ) {}
+
+  execute(context: EffectContext): void {
+    const target = context.engine.getPlayer(this.targetPlayerId);
+    if (target.isImmune) {
+      context.logger.info(`${target.name} is immune — drink blocked.`);
+      return;
+    }
+    target.addDrinks(this.amount);
+    context.logger.info(
+      `${target.name} drinks ${this.amount}x. [Reason: ${this.reason}] (Total: ${target.drinkCount})`,
+    );
+  }
+
+  describe(): string {
+    return `DrinkEffect(target=${this.targetPlayerId}, amount=${this.amount}, reason="${this.reason}")`;
+  }
+
+  serialize(): Record<string, unknown> {
+    return { type: this.type, targetPlayerId: this.targetPlayerId, amount: this.amount, reason: this.reason };
+  }
+}
+
+export class RemoveDrinkEffect implements Effect {
+  readonly type = EffectType.REMOVE_DRINK;
+
+  constructor(
+    readonly targetPlayerId: string,
+    private readonly amount: number,
+  ) {}
+
+  execute(context: EffectContext): void {
+    const target = context.engine.getPlayer(this.targetPlayerId);
+    target.removeDrinks(this.amount);
+    context.logger.info(`${target.name} loses ${this.amount} drink(s). (Total: ${target.drinkCount})`);
+  }
+
+  describe(): string {
+    return `RemoveDrinkEffect(target=${this.targetPlayerId}, amount=${this.amount})`;
+  }
+
+  serialize(): Record<string, unknown> {
+    return { type: this.type, targetPlayerId: this.targetPlayerId, amount: this.amount };
+  }
+}
+
+// ================================
+// effects/RedirectEffect.ts
+// ================================
+
+import { EffectType, type Effect, type EffectContext } from './Effect';
+import { DrinkEffect } from './DrinkEffect';
+
+/**
+ * RedirectEffect — intercepts a DrinkEffect and retargets it.
+ * Used by Trickster.
+ */
+export class RedirectEffect implements Effect {
+  readonly type = EffectType.REDIRECT;
+
+  constructor(
+    readonly targetPlayerId: string,   // the new recipient
+    private readonly originalEffect: DrinkEffect,
+    private readonly redirectorName: string,
+  ) {}
+
+  execute(context: EffectContext): void {
+    const original = context.engine.getPlayer(this.originalEffect.targetPlayerId);
+    const redirect = context.engine.getPlayer(this.targetPlayerId);
+    context.logger.info(
+      `${this.redirectorName} redirects drink from ${original.name} → ${redirect.name}`,
+    );
+    const newEffect = new DrinkEffect(this.targetPlayerId, 1, 'Redirected by Trickster');
+    newEffect.execute(context);
+  }
+
+  describe(): string {
+    return `RedirectEffect(from=${this.originalEffect.targetPlayerId}, to=${this.targetPlayerId})`;
+  }
+
+  serialize(): Record<string, unknown> {
+    return {
+      type: this.type,
+      from: this.originalEffect.targetPlayerId,
+      to: this.targetPlayerId,
+      redirectorName: this.redirectorName,
+    };
+  }
+}
+
+// ================================
+// effects/SwapEffect.ts
+// ================================
+
+import { EffectType, type Effect, type EffectContext } from './Effect';
+
+/** SwapEffect — swaps drink totals between two players. Used by Bartender & Trickster. */
+export class SwapEffect implements Effect {
+  readonly type = EffectType.SWAP_DRINKS;
+
+  constructor(
+    readonly targetPlayerId: string,
+    private readonly otherPlayerId: string,
+  ) {}
+
+  execute(context: EffectContext): void {
+    const a = context.engine.getPlayer(this.targetPlayerId);
+    const b = context.engine.getPlayer(this.otherPlayerId);
+    const aCount = a.drinkCount;
+    const bCount = b.drinkCount;
+    a.removeDrinks(aCount);
+    b.removeDrinks(bCount);
+    a.addDrinks(bCount);
+    b.addDrinks(aCount);
+    context.logger.info(`Swapped drink counts: ${a.name}(${bCount}) ↔ ${b.name}(${aCount})`);
+  }
+
+  describe(): string {
+    return `SwapEffect(a=${this.targetPlayerId}, b=${this.otherPlayerId})`;
+  }
+
+  serialize(): Record<string, unknown> {
+    return { type: this.type, a: this.targetPlayerId, b: this.otherPlayerId };
+  }
+}
+
+// ================================
+// effects/SkipEffect.ts
+// ================================
+
+import { EffectType, type Effect, type EffectContext } from './Effect';
+
+export class SkipEffect implements Effect {
+  readonly type = EffectType.SKIP_TURN;
+
+  constructor(readonly targetPlayerId: string) {}
+
+  execute(context: EffectContext): void {
+    const target = context.engine.getPlayer(this.targetPlayerId);
+    target.setSkipped(true);
+    context.logger.info(`${target.name} will skip their next turn.`);
+  }
+
+  describe(): string { return `SkipEffect(target=${this.targetPlayerId})`; }
+  serialize(): Record<string, unknown> { return { type: this.type, targetPlayerId: this.targetPlayerId }; }
+}
+
+// ================================
+// effects/ImmunityEffect.ts
+// ================================
+
+import { EffectType, type Effect, type EffectContext } from './Effect';
+
+export class ImmunityEffect implements Effect {
+  readonly type = EffectType.IMMUNITY;
+
+  constructor(readonly targetPlayerId: string, private readonly active: boolean) {}
+
+  execute(context: EffectContext): void {
+    const target = context.engine.getPlayer(this.targetPlayerId);
+    target.setImmune(this.active);
+    context.logger.info(`${target.name} immunity set to ${this.active}.`);
+  }
+
+  describe(): string { return `ImmunityEffect(target=${this.targetPlayerId}, active=${this.active})`; }
+  serialize(): Record<string, unknown> { return { type: this.type, targetPlayerId: this.targetPlayerId, active: this.active }; }
+}
+
+// ================================
+// effects/EffectResolver.ts
+// ================================
+
+import type { Effect, EffectContext } from './Effect';
+import type { GameEngine } from '../core/GameEngine';
+import { GameEventType, type EffectAppliedPayload } from '../core/GameEvents';
+
+/** Interception hook — return false to cancel the effect */
+export type EffectInterceptor = (effect: Effect, context: EffectContext) => boolean;
+
+/**
+ * EffectResolver — single point of effect execution.
+ *
+ * Architectural notes:
+ *   - Interceptors run before execute() — enables Lawyer cancellation
+ *   - History is stored for Time Traveler replay
+ *   - All mutation goes through here, never directly from roles
+ *
+ * Future hooks:
+ *   - [NETWORK] Serialize effect before resolve for broadcast
+ *   - [REPLAY] Write to append-only event log here
+ */
+export class EffectResolver {
+  private readonly interceptors: Map<string, EffectInterceptor> = new Map();
+  private readonly history: Effect[] = [];
+
+  addInterceptor(id: string, fn: EffectInterceptor): void {
+    this.interceptors.set(id, fn);
+  }
+
+  removeInterceptor(id: string): void {
+    this.interceptors.delete(id);
+  }
+
+  get effectHistory(): ReadonlyArray<Effect> {
+    return this.history;
+  }
+
+  resolve(effects: Effect[], context: EffectContext, engine: GameEngine): void {
+    for (const effect of effects) {
+      const cancelled = this.runInterceptors(effect, context, engine);
+      if (cancelled) continue;
+
+      context.logger.debug(`Executing: ${effect.describe()}`);
+      effect.execute(context);
+      this.history.push(effect);
+
+      engine.emit<EffectAppliedPayload>(GameEventType.EFFECT_APPLIED, {
+        effectType: effect.type,
+        targetPlayerId: effect.targetPlayerId,
+      });
+    }
+  }
+
+  /** Returns true if effect was cancelled by any interceptor */
+  private runInterceptors(effect: Effect, context: EffectContext, engine: GameEngine): boolean {
+    for (const [id, interceptor] of this.interceptors.entries()) {
+      const allowed = interceptor(effect, context);
+      if (!allowed) {
+        context.logger.warn(`Effect [${effect.describe()}] CANCELLED by interceptor "${id}"`);
+        engine.emit<{ effectType: string; cancelledBy: string }>(GameEventType.EFFECT_CANCELLED, {
+          effectType: effect.type,
+          cancelledBy: id,
+        });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Replays the last N effects — used by Time Traveler */
+  replayLast(n: number, context: EffectContext, engine: GameEngine): void {
+    const toReplay = this.history.slice(-n);
+    context.logger.info(`[TimeTraveler] Replaying last ${toReplay.length} effect(s)`);
+    for (const effect of toReplay) {
+      context.logger.info(`  ↩ Replaying: ${effect.describe()}`);
+      effect.execute(context);
+    }
+  }
+}
+
+// ================================
+// roles/BaseRole.ts
+// ================================
+
+import type { GameEngine } from '../core/GameEngine';
+import type { Player } from '../core/Player';
+import type { GameEvent } from '../core/GameEvents';
+import type { Effect } from '../effects/Effect';
+import type { Logger } from '../services/Logger';
+import type { RandomProvider } from '../services/RandomProvider';
+
+export interface RoleContext {
+  readonly player: Player;
+  readonly engine: GameEngine;
+  readonly logger: Logger;
+  readonly random: RandomProvider;
+  readonly allPlayers: Player[];
+}
+
+/**
+ * BaseRole — contract all roles must satisfy.
+ *
+ * Lifecycle:
+ *   onRegister  → called once when role is bound to player
+ *   onEvent     → called on every engine event (passive hook)
+ *   usePowerUp  → active ability (player-triggered)
+ *   triggerPowerDown → triggered drawback
+ *
+ * [COOLDOWN] Add cooldownTurns property and check in GameEngine before
+ * allowing usePowerUp to be called.
+ *
+ * [STACKING] Allow multiple roles per player by registering multiple
+ * BaseRole instances and chaining onEvent calls.
+ */
+export abstract class BaseRole {
+  abstract readonly name: string;
+  abstract readonly description: string;
+
+  onRegister?(engine: GameEngine, player: Player): void;
+
+  onEvent?(event: GameEvent<unknown>, context: RoleContext): void;
+
+  abstract usePowerUp(context: RoleContext): Effect[];
+
+  abstract triggerPowerDown(context: RoleContext): Effect[];
+}
+
+// ================================
+// roles/Berserker.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { DrinkEffect } from '../effects/DrinkEffect';
+import type { GameEngine } from '../core/GameEngine';
+import type { Player } from '../core/Player';
+
+const BERSERKER_RAGE_DRINKS    = 2;
+const BERSERKER_PASSIVE_DRINKS = 1;
+
+/**
+ * Berserker — deals extra drinks when enraged.
+ * Passive: When Berserker takes a drink, they deal 1 back to the assigner.
+ * PowerUp: Assign 2 drinks to any target.
+ * PowerDown: Take 2 drinks themselves.
+ */
+export class Berserker extends BaseRole {
+  readonly name = 'Berserker';
+  readonly description = 'Rage fuels retaliation. Every drink received is repaid in kind.';
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.DRINK_TAKEN) {
+      const payload = event.payload as { playerId: string; amount: number };
+      if (payload.playerId !== context.player.id) return;
+
+      // Passive: retaliate against whoever assigned the last drink
+      // In a full impl, DRINK_ASSIGNED event would carry fromPlayerId for targeting.
+      // Here we emit a retaliatory counter-drink back to the active player.
+      context.logger.info(`[Berserker] ${context.player.name} retaliates!`);
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const targets = context.allPlayers.filter(p => p.id !== context.player.id);
+    if (targets.length === 0) return [];
+    const target = context.random.pick(targets);
+    context.logger.info(`[Berserker] ${context.player.name} goes berserk on ${target.name}!`);
+    return [new DrinkEffect(target.id, BERSERKER_RAGE_DRINKS, 'Berserker Rage')];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Berserker] ${context.player.name} exhausts their rage!`);
+    return [new DrinkEffect(context.player.id, BERSERKER_RAGE_DRINKS, 'Berserker Exhaustion')];
+  }
+}
+
+// ================================
+// roles/Trickster.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { RedirectEffect } from '../effects/RedirectEffect';
+import { DrinkEffect } from '../effects/DrinkEffect';
+
+/**
+ * Trickster — misdirection specialist.
+ * Passive: 50% chance to redirect incoming drinks to a random other player.
+ * PowerUp: Redirect the last drink assigned to someone else.
+ * PowerDown: Takes 2 drinks themselves.
+ */
+export class Trickster extends BaseRole {
+  readonly name = 'Trickster';
+  readonly description = 'Nothing is as it seems. Drinks have a way of finding new targets.';
+
+  private lastIncomingDrink: DrinkEffect | null = null;
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.DRINK_ASSIGNED) {
+      const payload = event.payload as { toPlayerId: string; amount: number; fromPlayerId: string };
+      if (payload.toPlayerId !== context.player.id) return;
+
+      // Store for PowerUp reference
+      this.lastIncomingDrink = new DrinkEffect(payload.toPlayerId, payload.amount, 'Original assignment');
+
+      // Passive 50% dodge
+      if (context.random.next() < 0.5) {
+        const others = context.allPlayers.filter(
+          p => p.id !== context.player.id && p.id !== payload.fromPlayerId,
+        );
+        if (others.length === 0) return;
+        const redirectTo = context.random.pick(others);
+        context.logger.info(`[Trickster] Passive redirect triggered!`);
+        const effects = [new RedirectEffect(redirectTo.id, this.lastIncomingDrink, context.player.name)];
+        context.engine.resolveEffects(effects, {
+          sourcePlayer: context.player,
+          engine: context.engine,
+          logger: context.logger,
+        });
+      }
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    if (!this.lastIncomingDrink) {
+      context.logger.warn('[Trickster] No drink to redirect yet.');
+      return [];
+    }
+    const targets = context.allPlayers.filter(p => p.id !== context.player.id);
+    if (targets.length === 0) return [];
+    const newTarget = context.random.pick(targets);
+    return [new RedirectEffect(newTarget.id, this.lastIncomingDrink, context.player.name)];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Trickster] The trick backfires!`);
+    return [new DrinkEffect(context.player.id, 2, 'Trickster Backfire')];
+  }
+}
+
+// ================================
+// roles/Lightweight.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { DrinkEffect } from '../effects/DrinkEffect';
+import { ImmunityEffect } from '../effects/ImmunityEffect';
+
+/**
+ * Lightweight — low tolerance but quick recovery.
+ * Passive: Every 3 drinks received, takes 1 extra (low tolerance).
+ * PowerUp: Gains immunity for 1 round.
+ * PowerDown: Drinks double the next assigned amount.
+ */
+export class Lightweight extends BaseRole {
+  readonly name = 'Lightweight';
+  readonly description = 'Fragile but surprisingly resilient in short bursts.';
+
+  private drinksSinceLastTrigger = 0;
+  private static readonly TOLERANCE_THRESHOLD = 3;
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.DRINK_TAKEN) {
+      const payload = event.payload as { playerId: string; amount: number };
+      if (payload.playerId !== context.player.id) return;
+
+      this.drinksSinceLastTrigger += payload.amount;
+      if (this.drinksSinceLastTrigger >= Lightweight.TOLERANCE_THRESHOLD) {
+        this.drinksSinceLastTrigger = 0;
+        context.logger.info(`[Lightweight] Low tolerance triggered — extra drink!`);
+        context.engine.resolveEffects(
+          [new DrinkEffect(context.player.id, 1, 'Lightweight Tolerance')],
+          { sourcePlayer: context.player, engine: context.engine, logger: context.logger },
+        );
+      }
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    context.logger.info(`[Lightweight] ${context.player.name} steels themselves — temporary immunity!`);
+    return [new ImmunityEffect(context.player.id, true)];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Lightweight] Immunity collapses — vulnerability exposed!`);
+    return [
+      new ImmunityEffect(context.player.id, false),
+      new DrinkEffect(context.player.id, 2, 'Lightweight Crash'),
+    ];
+  }
+}
+
+// ================================
+// roles/Tank.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { DrinkEffect } from '../effects/DrinkEffect';
+import { RemoveDrinkEffect } from '../effects/DrinkEffect';
+
+/**
+ * Tank — absorbs punishment for others.
+ * Passive: Can absorb 1 drink per round meant for an ally.
+ * PowerUp: Give 2 drinks to a target, remove 1 from self.
+ * PowerDown: Takes 3 drinks (over-extension).
+ */
+export class Tank extends BaseRole {
+  readonly name = 'Tank';
+  readonly description = 'Built different. Drinks for the team, punishes enemies.';
+
+  private hasAbsorbedThisRound = false;
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.ROUND_STARTED) {
+      this.hasAbsorbedThisRound = false;
+    }
+
+    if (event.type === GameEventType.DRINK_ASSIGNED && !this.hasAbsorbedThisRound) {
+      const payload = event.payload as { toPlayerId: string };
+      // If another player is being targeted, Tank can absorb
+      if (payload.toPlayerId !== context.player.id && context.random.next() < 0.3) {
+        this.hasAbsorbedThisRound = true;
+        context.logger.info(`[Tank] ${context.player.name} takes the hit for ${payload.toPlayerId}!`);
+        context.engine.resolveEffects(
+          [new DrinkEffect(context.player.id, 1, 'Tank Absorption')],
+          { sourcePlayer: context.player, engine: context.engine, logger: context.logger },
+        );
+      }
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const targets = context.allPlayers.filter(p => p.id !== context.player.id);
+    if (targets.length === 0) return [];
+    const target = context.random.pick(targets);
+    context.logger.info(`[Tank] ${context.player.name} strikes ${target.name} and recovers!`);
+    return [
+      new DrinkEffect(target.id, 2, 'Tank Strike'),
+      new RemoveDrinkEffect(context.player.id, 1),
+    ];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Tank] Over-extended — taking heavy damage!`);
+    return [new DrinkEffect(context.player.id, 3, 'Tank Overextension')];
+  }
+}
+
+// ================================
+// roles/SocialButterfly.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { DrinkEffect } from '../effects/DrinkEffect';
+
+/**
+ * Social Butterfly — thrives on group dynamics.
+ * Passive: When a new round starts, deals 1 drink to the player with the most drinks.
+ * PowerUp: All other players drink 1.
+ * PowerDown: Drinks 1 for each other player (social debt).
+ */
+export class SocialButterfly extends BaseRole {
+  readonly name = 'Social Butterfly';
+  readonly description = 'Life of the party — everyone drinks when she says so.';
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.ROUND_STARTED) {
+      const mostDrinks = context.allPlayers
+        .filter(p => p.id !== context.player.id)
+        .sort((a, b) => b.drinkCount - a.drinkCount)[0];
+
+      if (mostDrinks) {
+        context.logger.info(`[SocialButterfly] Passive: ${mostDrinks.name} is targeted!`);
+        context.engine.resolveEffects(
+          [new DrinkEffect(mostDrinks.id, 1, 'Social Butterfly Passive')],
+          { sourcePlayer: context.player, engine: context.engine, logger: context.logger },
+        );
+      }
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const others = context.allPlayers.filter(p => p.id !== context.player.id);
+    context.logger.info(`[SocialButterfly] Party time — everyone drinks!`);
+    return others.map(p => new DrinkEffect(p.id, 1, 'Social Butterfly Toast'));
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    const otherCount = context.allPlayers.filter(p => p.id !== context.player.id).length;
+    context.logger.info(`[SocialButterfly] Social debt — drinking for everyone!`);
+    return [new DrinkEffect(context.player.id, otherCount, 'Social Butterfly Debt')];
+  }
+}
+
+// ================================
+// roles/Gremlin.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import { DrinkEffect } from '../effects/DrinkEffect';
+
+const GREMLIN_DISTRIBUTE_TOTAL = 3;
+
+/**
+ * Gremlin — chaotic neutral drink distributor.
+ * Passive: None.
+ * PowerUp: Randomly distributes 3 drinks across all players (deterministic via RandomProvider).
+ * PowerDown: All chaos redirects to themselves.
+ *
+ * RandomProvider is injected — never calls Math.random() directly.
+ * This makes Gremlin's distribution fully testable and replayable.
+ */
+export class Gremlin extends BaseRole {
+  readonly name = 'Gremlin';
+  readonly description = 'Pure chaos. No one is safe, not even the Gremlin.';
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const effects: Effect[] = [];
+    const players = context.allPlayers;
+    if (players.length === 0) return [];
+
+    for (let i = 0; i < GREMLIN_DISTRIBUTE_TOTAL; i++) {
+      // RandomProvider.pick is deterministic when using SeededRandomProvider
+      const target = context.random.pick(players);
+      effects.push(new DrinkEffect(target.id, 1, 'Gremlin Chaos'));
+    }
+
+    context.logger.info(`[Gremlin] ${context.player.name} unleashes chaos!`);
+    return effects;
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Gremlin] Chaos absorbed — all drinks come home!`);
+    return [new DrinkEffect(context.player.id, GREMLIN_DISTRIBUTE_TOTAL, 'Gremlin Self-Chaos')];
+  }
+}
+
+// ================================
+// roles/Lawyer.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEngine } from '../core/GameEngine';
+import type { Player } from '../core/Player';
+import { DrinkEffect } from '../effects/DrinkEffect';
+import { EffectType } from '../effects/Effect';
+
+const LAWYER_OBJECTIONS_PER_ROUND = 2;
+
+/**
+ * Lawyer — exploits legal loopholes to cancel effects.
+ *
+ * Passive: Registers an interceptor on the EffectResolver that can cancel
+ *          DRINK effects targeting the Lawyer, up to N times per round.
+ *          Interceptor is installed on onRegister and persists for game lifetime.
+ *
+ * PowerUp: Cancel the next drink effect targeting any player (one-time).
+ * PowerDown: Loses all objections and takes 2 drinks (disbarment).
+ *
+ * Interception architecture:
+ *   - EffectResolver has an interceptor map keyed by string ID.
+ *   - Lawyer registers an interceptor under `lawyer-<playerId>`.
+ *   - Each interceptor returns false to cancel the effect.
+ */
+export class Lawyer extends BaseRole {
+  readonly name = 'Lawyer';
+  readonly description = 'Legally, they don\'t have to drink. For now.';
+
+  private objections = LAWYER_OBJECTIONS_PER_ROUND;
+  private shieldedPlayerId: string | null = null;
+
+  onRegister(engine: GameEngine, player: Player): void {
+    // Install persistent interceptor into EffectResolver
+    engine['effectResolver'].addInterceptor(`lawyer-${player.id}`, (effect, _context) => {
+      // Cancel drinks targeting this player while objections remain
+      if (
+        effect.type === EffectType.DRINK &&
+        effect.targetPlayerId === player.id &&
+        this.objections > 0
+      ) {
+        this.objections--;
+        engine.logger.warn(
+          `[Lawyer] OBJECTION! Drink blocked for ${player.name}. Objections left: ${this.objections}`,
+        );
+        return false; // cancel
+      }
+
+      // Cancel drinks targeting shielded ally (PowerUp)
+      if (
+        effect.type === EffectType.DRINK &&
+        this.shieldedPlayerId !== null &&
+        effect.targetPlayerId === this.shieldedPlayerId
+      ) {
+        engine.logger.warn(`[Lawyer] Shield triggered for ${this.shieldedPlayerId}`);
+        this.shieldedPlayerId = null;
+        return false;
+      }
+
+      return true; // allow
+    });
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const targets = context.allPlayers.filter(p => p.id !== context.player.id);
+    if (targets.length === 0) return [];
+    const ally = context.random.pick(targets);
+    this.shieldedPlayerId = ally.id;
+    context.logger.info(`[Lawyer] ${context.player.name} extends legal protection to ${ally.name}`);
+    return []; // effect handled via interceptor
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Lawyer] ${context.player.name} DISBARRED — all objections lost!`);
+    this.objections = 0;
+    this.shieldedPlayerId = null;
+    return [new DrinkEffect(context.player.id, 2, 'Lawyer Disbarment')];
+  }
+}
+
+// ================================
+// roles/Cleric.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEvent } from '../core/GameEvents';
+import { GameEventType } from '../core/GameEvents';
+import { RemoveDrinkEffect } from '../effects/DrinkEffect';
+import { DrinkEffect } from '../effects/DrinkEffect';
+
+const CLERIC_HEAL_AMOUNT   = 2;
+const CLERIC_PASSIVE_HEAL  = 1;
+
+/**
+ * Cleric — healer and buffer.
+ * Passive: At round start, removes 1 drink from the player with the most drinks.
+ * PowerUp: Removes 2 drinks from any player.
+ * PowerDown: Takes 2 drinks (divine punishment).
+ */
+export class Cleric extends BaseRole {
+  readonly name = 'Cleric';
+  readonly description = 'Channel divine mercy. Or suffer divine punishment.';
+
+  onEvent(event: GameEvent<unknown>, context: RoleContext): void {
+    if (event.type === GameEventType.ROUND_STARTED) {
+      const neediest = context.allPlayers
+        .sort((a, b) => b.drinkCount - a.drinkCount)[0];
+
+      if (neediest && neediest.drinkCount > 0) {
+        context.logger.info(`[Cleric] Healing ${neediest.name}`);
+        context.engine.resolveEffects(
+          [new RemoveDrinkEffect(neediest.id, CLERIC_PASSIVE_HEAL)],
+          { sourcePlayer: context.player, engine: context.engine, logger: context.logger },
+        );
+      }
+    }
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const targets = context.allPlayers.filter(p => p.drinkCount > 0);
+    if (targets.length === 0) {
+      context.logger.info('[Cleric] No one needs healing.');
+      return [];
+    }
+    const target = targets.sort((a, b) => b.drinkCount - a.drinkCount)[0];
+    context.logger.info(`[Cleric] ${context.player.name} heals ${target.name} for ${CLERIC_HEAL_AMOUNT}`);
+    return [new RemoveDrinkEffect(target.id, CLERIC_HEAL_AMOUNT)];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Cleric] Divine punishment!`);
+    return [new DrinkEffect(context.player.id, CLERIC_HEAL_AMOUNT, 'Divine Punishment')];
+  }
+}
+
+// ================================
+// roles/TimeTraveler.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect } from '../effects/Effect';
+import type { GameEngine } from '../core/GameEngine';
+import type { Player } from '../core/Player';
+import { DrinkEffect } from '../effects/DrinkEffect';
+
+const REPLAY_DEPTH = 3;
+
+/**
+ * Time Traveler — manipulates effect history.
+ *
+ * Passive: None (history tracking is always-on in EffectResolver).
+ * PowerUp: Replays the last 3 effects from history (drinking them again).
+ * PowerDown: Paradox — takes 3 drinks.
+ *
+ * The EffectResolver maintains a full effect history.
+ * TimeTraveler calls effectResolver.replayLast(N, context, engine).
+ *
+ * [REPLAY SYSTEM] The history array in EffectResolver can be serialised
+ * and replayed for game recordings or debugging.
+ */
+export class TimeTraveler extends BaseRole {
+  readonly name = 'Time Traveler';
+  readonly description = 'What happened will happen again. Time is a flat circle.';
+
+  private effectResolverRef: import('../effects/EffectResolver').EffectResolver | null = null;
+
+  onRegister(engine: GameEngine, _player: Player): void {
+    // Store reference to resolver for replay — injected via engine
+    this.effectResolverRef = engine['effectResolver'];
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    if (!this.effectResolverRef) return [];
+    context.logger.info(`[TimeTraveler] ${context.player.name} rewinds time!`);
+    this.effectResolverRef.replayLast(REPLAY_DEPTH, {
+      sourcePlayer: context.player,
+      engine: context.engine,
+      logger: context.logger,
+    }, context.engine);
+    return [];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[TimeTraveler] Temporal paradox — reality collapses!`);
+    return [new DrinkEffect(context.player.id, 3, 'Temporal Paradox')];
+  }
+}
+
+// ================================
+// roles/Bartender.ts
+// ================================
+
+import { BaseRole, type RoleContext } from './BaseRole';
+import type { Effect, EffectContext } from '../effects/Effect';
+import type { GameEngine } from '../core/GameEngine';
+import type { Player } from '../core/Player';
+import type { GameRuleModifier } from '../core/GameEngine';
+import { DrinkEffect } from '../effects/DrinkEffect';
+import { EffectType } from '../effects/Effect';
+
+const BARTENDER_MODIFIER_ID = 'bartender-house-rule';
+
+/**
+ * Bartender — installs global rule modifiers.
+ *
+ * Passive: Registers a house rule on game start: all DRINK effects of 1
+ *          are doubled (last call modifier).
+ *
+ * PowerUp: Swap drink counts between two random players.
+ * PowerDown: Remove the house rule and take 2 drinks.
+ *
+ * Modifier system:
+ *   - GameEngine.addRuleModifier installs a transform function
+ *   - All effects pass through modifiers before execution
+ *   - Multiple modifiers stack and can be removed per-ID
+ *
+ * [MIDDLEWARE] This is effectively a middleware layer on the effect pipeline.
+ * Future modifiers could: add poison effects, change redirect logic, etc.
+ */
+export class Bartender extends BaseRole {
+  readonly name = 'Bartender';
+  readonly description = 'Their bar, their rules. House always wins.';
+
+  onRegister(engine: GameEngine, _player: Player): void {
+    const modifier: GameRuleModifier = {
+      id: BARTENDER_MODIFIER_ID,
+      description: 'Last Call: Single drinks are doubled',
+      apply(effects: Effect[], _context: EffectContext): Effect[] {
+        return effects.map(effect => {
+          if (effect.type === EffectType.DRINK) {
+            const d = effect as DrinkEffect;
+            // Access private fields via serialise for reconstruction
+            const s = d.serialize() as { amount: number; targetPlayerId: string; reason: string };
+            if (s.amount === 1) {
+              engine.logger.info(`[Bartender] Last Call modifier: doubling drink for ${s.targetPlayerId}`);
+              return new DrinkEffect(s.targetPlayerId, 2, `${s.reason} [Last Call]`);
+            }
+          }
+          return effect;
+        });
+      },
+    };
+
+    engine.addRuleModifier(modifier);
+  }
+
+  usePowerUp(context: RoleContext): Effect[] {
+    const players = context.allPlayers;
+    if (players.length < 2) return [];
+    const shuffled = context.random.shuffle([...players]);
+    const a = shuffled[0];
+    const b = shuffled[1];
+    context.logger.info(`[Bartender] ${context.player.name} swaps ${a.name} ↔ ${b.name}`);
+    // SwapEffect is symmetric — one effect handles both sides
+    return [new (require('../effects/SwapEffect').SwapEffect)(a.id, b.id)];
+  }
+
+  triggerPowerDown(context: RoleContext): Effect[] {
+    context.logger.info(`[Bartender] Health inspector arrives — house rules revoked!`);
+    context.engine.removeRuleModifier(BARTENDER_MODIFIER_ID);
+    return [new DrinkEffect(context.player.id, 2, 'Bartender Shutdown')];
+  }
+}
+
+// ================================
+// roles/index.ts
+// ================================
+
+export { Berserker }    from './Berserker';
+export { Trickster }    from './Trickster';
+export { Lightweight }  from './Lightweight';
+export { Tank }         from './Tank';
+export { SocialButterfly } from './SocialButterfly';
+export { Gremlin }      from './Gremlin';
+export { Lawyer }       from './Lawyer';
+export { Cleric }       from './Cleric';
+export { TimeTraveler } from './TimeTraveler';
+export { Bartender }    from './Bartender';
+
+// ================================
+// bootstrap / main.ts  (demonstration)
+// ================================
+
+// ─── Service instantiation ──────────────────────────────────────────────────
+
+const logger         = new ConsoleLogger('PourDecisions');
+const random         = new SeededRandomProvider(42); // deterministic seed for demo
+const effectResolver = new EffectResolver();
+
+// ─── Engine wiring ──────────────────────────────────────────────────────────
+
+const engine = new GameEngine(logger, random, effectResolver);
+
+// ─── Players & Roles ────────────────────────────────────────────────────────
+
+const alice  = new Player('p1', 'Alice');
+const bob    = new Player('p2', 'Bob');
+const carol  = new Player('p3', 'Carol');
+const dave   = new Player('p4', 'Dave');
+
+const aliceRole = new Lawyer();       // Alice will intercept effects
+const bobRole   = new Gremlin();      // Bob spreads chaos
+const carolRole = new TimeTraveler(); // Carol replays history
+const daveRole  = new Bartender();    // Dave sets house rules
+
+engine.registerPlayer(alice, aliceRole);
+engine.registerPlayer(bob,   bobRole);
+engine.registerPlayer(carol, carolRole);
+engine.registerPlayer(dave,  daveRole);
+
+// ─── Wire up TurnManager and Game ───────────────────────────────────────────
+
+const turnManager = new TurnManager(engine);
+const game        = new Game(engine, turnManager, logger);
+
+// ─── External event listener (demonstrates typed subscription) ──────────────
+
+engine.on<EffectAppliedPayload>(GameEventType.EFFECT_APPLIED, (event) => {
+  logger.debug(`[OBSERVER] Effect applied — type: ${event.payload.effectType}, target: ${event.payload.targetPlayerId}`);
+});
+
+engine.on<RoundStartedPayload>(GameEventType.ROUND_STARTED, (event) => {
+  logger.info(`\n${'═'.repeat(60)}\n ROUND ${event.payload.round} BEGINS\n${'═'.repeat(60)}`);
+});
+
+// ─── Simulation ─────────────────────────────────────────────────────────────
+
+(async () => {
+  logger.info('\n🍺 POUR DECISIONS — Game Engine Demo\n');
+
+  // ── Round 1 ──────────────────────────────────────────────────────────────
+  await game.runRound();
+
+  // Manual power demonstrations —————————————————————————————————————————————
+
+  logger.info('\n--- Bob (Gremlin) uses PowerUp ---');
+  const gremlinContext = engine.makeRoleContext(bob);
+  const gremlinEffects = bobRole.usePowerUp(gremlinContext);
+  engine.resolveEffects(gremlinEffects, {
+    sourcePlayer: bob,
+    engine,
+    logger,
+  });
+
+  logger.info('\n--- Alice (Lawyer) PowerUp — shields an ally ---');
+  const lawyerContext = engine.makeRoleContext(alice);
+  aliceRole.usePowerUp(lawyerContext); // Registers shield (no effects returned)
+
+  logger.info('\n--- Attempting to assign 1 drink to Alice (should be intercepted) ---');
+  const drinkAtAlice = new DrinkEffect(alice.id, 1, 'Test attack on Alice');
+  engine.resolveEffects([drinkAtAlice], { sourcePlayer: bob, engine, logger });
+
+  logger.info('\n--- Dave (Bartender) house rule in effect — assigning 1 drink to Bob ---');
+  const drinkAtBob = new DrinkEffect(bob.id, 1, 'Regular drink');
+  engine.resolveEffects([drinkAtBob], { sourcePlayer: alice, engine, logger });
+
+  // ── Round 2 ──────────────────────────────────────────────────────────────
+  await game.runRound();
+
+  logger.info('\n--- Carol (Time Traveler) replays last 3 effects ---');
+  const timeTravelerContext = engine.makeRoleContext(carol);
+  carolRole.usePowerUp(timeTravelerContext);
+
+  logger.info('\n--- Dave (Bartender) PowerDown — removes house rule ---');
+  const bartenderContext = engine.makeRoleContext(dave);
+  const bartenderEffects = daveRole.triggerPowerDown(bartenderContext);
+  engine.resolveEffects(bartenderEffects, { sourcePlayer: dave, engine, logger });
+
+  // ── Final standings ───────────────────────────────────────────────────────
+  logger.info('\n📊 FINAL DRINK COUNTS:');
+  for (const player of engine.getAllPlayers()) {
+    logger.info(`  ${player.name.padEnd(14)} (${engine.getRole(player.id).name.padEnd(14)}) → ${player.drinkCount} drinks`);
+  }
+
+  logger.info('\n📜 EFFECT HISTORY (last 5):');
+  const history = effectResolver.effectHistory.slice(-5);
+  history.forEach((e, i) => logger.info(`  ${i + 1}. ${e.describe()}`));
+})();
+
+Role.usePowerUp() → Effect[] → GameEngine.resolveEffects()
+  → applyRuleModifiers() [Bartender layer]
+    → EffectResolver.resolve()
+      → runInterceptors() [Lawyer layer]
+        → effect.execute() [state mutation]
+          → emit(EFFECT_APPLIED)
+
